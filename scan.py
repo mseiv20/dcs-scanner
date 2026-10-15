@@ -1,5 +1,6 @@
 import os, re, asyncio, requests
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from urllib import robotparser
 from urllib.parse import urlparse, quote
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
@@ -8,15 +9,17 @@ SB = os.environ["SUPABASE_URL"].strip().rstrip("/") + "/rest/v1"
 KEY = os.environ["SUPABASE_SERVICE_KEY"].strip()
 H = {"apikey": KEY, "Content-Type": "application/json"}
 COMPETITOR_ID = os.environ.get("COMPETITOR_ID", "").strip()
+USER_ID = os.environ.get("USER_ID", "").strip()
 
 UA = "Mozilla/5.0 (compatible; DiscountCodeSniffer/1.0)"
 SOURCE = "crawl4ai"
 MAX_PAGES = 15
-STATUS_OK = "success"
+STATUS_OK = "ok"
 STATUS_ERR = "error"
 ALERT_STATUS = "pending"
 
 KEYWORDS = re.compile(r"promo|soldes?|offres?|coupon|code|bons?-plans?|deals?|sale|reduction|remise|black-friday", re.I)
+SKIP = re.compile(r"/(go|out|redirect|redir|click|track|aff|affiliate|link)/|[?&](url|redirect|ref|aff)=", re.I)
 QUAL = r"(?:\s+(?:promo|marraine|parrainage|réduction|de\s+réduction))?"
 CODE_RE = re.compile(
     r"(?P<intro>\b(?:avec|utilise[rz]?|saisi(?:r|s|ssez)?|entre[rz]?|tape[rz]?|mon|ton|votre|use)\s+(?:le\s+|the\s+)?)?"
@@ -38,6 +41,12 @@ def sb_post(table, data):
     r = requests.post(f"{SB}/{table}", headers=H, json=data, timeout=30)
     if r.status_code >= 300:
         print("Erreur Supabase", table, r.status_code, r.text[:300])
+    r.raise_for_status()
+
+def sb_patch(path, data):
+    r = requests.patch(f"{SB}/{path}", headers=H, json=data, timeout=30)
+    if r.status_code >= 300:
+        print("Erreur Supabase", path, r.status_code, r.text[:300])
     r.raise_for_status()
 
 RP = {}
@@ -142,13 +151,14 @@ async def scan(crawler, url):
     others = [h for h in inner + cand if h not in prio]
     seen, targets = set(), []
     for h in prio + others:
-        if h not in seen and allowed(h):
+        if h not in seen and not SKIP.search(h) and allowed(h):
             seen.add(h)
             targets.append(h)
     targets = targets[: MAX_PAGES - 1]
     if targets:
         for r in await crawler.arun_many(urls=targets, config=cfg):
-            if r.success:
+            final_r = getattr(r, "redirected_url", None) or r.url
+            if r.success and host(final_r) == site:
                 pages.append((r.url, md_of(r)))
     print(site, ":", len(pages), "page(s) lue(s)")
     out = {}
@@ -165,13 +175,19 @@ def log(c, status, action):
         print("log impossible:", e)
 
 async def main():
+    sel = "competitors?select=id,user_id,name,url"
     if COMPETITOR_ID:
         if not COMPETITOR_ID.isdigit():
             print("competitor_id invalide:", COMPETITOR_ID)
             return
-        comps = sb_get(f"competitors?select=id,user_id,name,url&id=eq.{COMPETITOR_ID}")
+        comps = sb_get(f"{sel}&id=eq.{COMPETITOR_ID}")
+    elif USER_ID:
+        if not re.fullmatch(r"[0-9a-fA-F-]{36}", USER_ID):
+            print("user_id invalide:", USER_ID)
+            return
+        comps = sb_get(f"{sel}&user_id=eq.{USER_ID}&enabled=eq.true")
     else:
-        comps = sb_get("competitors?select=id,user_id,name,url&enabled=eq.true")
+        comps = sb_get(f"{sel}&enabled=eq.true")
     print(len(comps), "concurrent(s) à scanner")
     async with AsyncWebCrawler() as crawler:
         for c in comps:
@@ -185,15 +201,22 @@ async def main():
                     print(c["name"], "ECHEC", err)
                     log(c, STATUS_ERR, err)
                     continue
-                old = sb_get(f"alerts?select=code&user_id=eq.{quote(str(c['user_id']))}&site=eq.{quote(c['name'])}")
-                known = {o["code"] for o in old}
-                new = [d for d in codes if d["code"] not in known]
-                for d in new:
-                    sb_post("alerts", {"user_id": c["user_id"], "site": c["name"], "code": d["code"],
-                                       "discount": d["percent"] or 0, "status": ALERT_STATUS,
-                                       "applied": False, "source": SOURCE})
-                print(c["name"], "OK", n_pages, "page(s),", len(new), "nouveau(x) code(s)")
-                log(c, STATUS_OK, f"{len(new)} nouveau(x) code(s), {n_pages} page(s) lue(s)")
+                now = datetime.now(timezone.utc).isoformat()
+                old = sb_get(f"alerts?select=id,code&user_id=eq.{quote(str(c['user_id']))}&site=eq.{quote(c['name'])}")
+                known = {o["code"]: o["id"] for o in old}
+                n_new = 0
+                for d in codes:
+                    if d["code"] in known:
+                        sb_patch(f"alerts?id=eq.{known[d['code']]}", {"last_seen_at": now})
+                    else:
+                        sb_post("alerts", {"user_id": c["user_id"], "site": c["name"], "code": d["code"],
+                                           "discount": d["percent"] or 0, "status": ALERT_STATUS,
+                                           "applied": False, "source": SOURCE, "last_seen_at": now})
+                        n_new += 1
+                print(c["name"], "OK", n_pages, "page(s),", len(codes), "code(s) trouvé(s), dont", n_new, "nouveau(x)")
+                print("  codes :", ", ".join(d["code"] for d in codes) or "aucun")
+                log(c, "found" if codes else STATUS_OK,
+                    f"{len(codes)} code(s) trouvé(s), dont {n_new} nouveau(x), {n_pages} page(s) lue(s)")
             except Exception as e:
                 print(c["name"], "ERREUR", e)
                 log(c, STATUS_ERR, str(e))
