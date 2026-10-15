@@ -6,7 +6,7 @@ from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 
 SB = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1"
 KEY = os.environ["SUPABASE_SERVICE_KEY"]
-H = {"apikey": KEY, "Authorization": "Bearer " + KEY, "Content-Type": "application/json"}
+H = {"apikey": KEY, "Content-Type": "application/json"}
 
 MAX_PAGES = 15            # pages lues par site (accueil comprise)
 STATUS_OK = "success"     # valeurs à vérifier avec l'app (voir étape D)
