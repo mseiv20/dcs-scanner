@@ -17,7 +17,7 @@ STATUS_ERR = "error"
 ALERT_STATUS = "pending"
 
 KEYWORDS = re.compile(r"promo|soldes?|offres?|coupon|code|bons?-plans?|deals?|sale|reduction|remise|black-friday", re.I)
-CODE_RE = re.compile(r"(?:code(?:\s+promo)?|promo\s*code|discount\s*code|coupon)\s*(?:est|:|=|-|–)?\s*[«\"“'‘]?\s*([A-Za-z0-9][A-Za-z0-9_-]{3,19})", re.I)
+CODE_RE = re.compile(r"(?:code(?:\s+promo)?|promo\s*code|discount\s*code|coupon)\s*(?:est|:|=|-|–)?[\s«»\"“”'‘’*_`]*([A-Za-z0-9][A-Za-z0-9_-]{3,19})", re.I)
 STOP = {"PROMO", "CODE", "COUPON", "SOLDES", "OFFRE", "VALIDE", "PANIER", "MERCI", "FRANCE", "LIVRAISON", "GRATUIT", "OFFERT", "DISCOUNT"}
 
 def sb_get(path):
