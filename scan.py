@@ -1,15 +1,17 @@
 import os, re, asyncio, requests
 import xml.etree.ElementTree as ET
 from urllib import robotparser
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 
-SB = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1"
-KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SB = os.environ["SUPABASE_URL"].strip().rstrip("/") + "/rest/v1"
+KEY = os.environ["SUPABASE_SERVICE_KEY"].strip()
 H = {"apikey": KEY, "Content-Type": "application/json"}
+COMPETITOR_ID = os.environ.get("COMPETITOR_ID", "").strip()
 
-MAX_PAGES = 15            # pages lues par site (accueil comprise)
-STATUS_OK = "success"     # valeurs à vérifier avec l'app (voir étape D)
+SOURCE = "crawl4ai"
+MAX_PAGES = 15
+STATUS_OK = "success"
 STATUS_ERR = "error"
 ALERT_STATUS = "pending"
 
@@ -24,6 +26,8 @@ def sb_get(path):
 
 def sb_post(table, data):
     r = requests.post(f"{SB}/{table}", headers=H, json=data, timeout=30)
+    if r.status_code >= 300:
+        print("Erreur Supabase", table, r.status_code, r.text[:300])
     r.raise_for_status()
 
 RP = {}
@@ -119,13 +123,20 @@ async def scan(crawler, url):
 
 def log(c, status, action):
     try:
-        sb_post("scan_logs", {"user_id": c["user_id"], "site": c["name"], "status": status, "action": action[:300]})
+        sb_post("scan_logs", {"user_id": c["user_id"], "site": c["name"], "status": status,
+                              "action": f"[crawl4ai] {action}"[:300]})
     except Exception as e:
         print("log impossible:", e)
 
 async def main():
-    comps = sb_get("competitors?select=id,user_id,name,url&enabled=eq.true")
-    print(len(comps), "concurrent(s) activé(s)")
+    if COMPETITOR_ID:
+        if not COMPETITOR_ID.isdigit():
+            print("competitor_id invalide:", COMPETITOR_ID)
+            return
+        comps = sb_get(f"competitors?select=id,user_id,name,url&id=eq.{COMPETITOR_ID}")
+    else:
+        comps = sb_get("competitors?select=id,user_id,name,url&enabled=eq.true")
+    print(len(comps), "concurrent(s) à scanner")
     async with AsyncWebCrawler() as crawler:
         for c in comps:
             url = site_url(c)
@@ -138,13 +149,14 @@ async def main():
                     print(c["name"], "ECHEC", err)
                     log(c, STATUS_ERR, err)
                     continue
-                old = sb_get(f"alerts?select=code&user_id=eq.{c['user_id']}&site=eq.{requests.utils.quote(c['name'])}")
+                old = sb_get(f"alerts?select=code&user_id=eq.{quote(str(c['user_id']))}&site=eq.{quote(c['name'])}")
                 known = {o["code"] for o in old}
                 new = [d for d in codes if d["code"] not in known]
                 for d in new:
                     sb_post("alerts", {"user_id": c["user_id"], "site": c["name"], "code": d["code"],
-                                       "discount": d["percent"] or 0, "status": ALERT_STATUS, "applied": False})
-                print(c["name"], "OK", n_pages, "page(s)", len(new), "nouveau(x)")
+                                       "discount": d["percent"] or 0, "status": ALERT_STATUS,
+                                       "applied": False, "source": SOURCE})
+                print(c["name"], "OK", n_pages, "page(s),", len(new), "nouveau(x) code(s)")
                 log(c, STATUS_OK, f"{len(new)} nouveau(x) code(s), {n_pages} page(s) lue(s)")
             except Exception as e:
                 print(c["name"], "ERREUR", e)
