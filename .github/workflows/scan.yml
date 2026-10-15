@@ -1,17 +1,22 @@
 name: scan
+run-name: ${{ inputs.competitor_id && format('Crawl4AI - concurrent {0}', inputs.competitor_id) || inputs.user_id && 'Crawl4AI - lancer le scan' || 'Crawl4AI - scan planifié' }}
 on:
   schedule:
     - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       competitor_id:
-        description: "ID du concurrent (vide = tous les concurrents actifs)"
+        description: "ID d'un concurrent (vide = non utilisé)"
+        required: false
+        default: ""
+      user_id:
+        description: "ID d'un utilisateur (vide = tous les concurrents actifs)"
         required: false
         default: ""
 permissions:
   contents: read
 concurrency:
-  group: scan-${{ inputs.competitor_id || 'all' }}
+  group: scan-${{ inputs.competitor_id || inputs.user_id || 'all' }}
   cancel-in-progress: false
 jobs:
   scan:
@@ -29,3 +34,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           COMPETITOR_ID: ${{ inputs.competitor_id }}
+          USER_ID: ${{ inputs.user_id }}
+          CRAWL4AI_NO_CLOUD_NOTICE: "1"
