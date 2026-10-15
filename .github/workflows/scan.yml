@@ -3,8 +3,16 @@ on:
   schedule:
     - cron: "0 */3 * * *"
   workflow_dispatch:
+    inputs:
+      competitor_id:
+        description: "ID du concurrent (vide = tous les concurrents actifs)"
+        required: false
+        default: ""
 permissions:
   contents: read
+concurrency:
+  group: scan-${{ inputs.competitor_id || 'all' }}
+  cancel-in-progress: false
 jobs:
   scan:
     runs-on: ubuntu-24.04
@@ -20,3 +28,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          COMPETITOR_ID: ${{ inputs.competitor_id }}
