@@ -17,11 +17,15 @@ STATUS_ERR = "error"
 ALERT_STATUS = "pending"
 
 KEYWORDS = re.compile(r"promo|soldes?|offres?|coupon|code|bons?-plans?|deals?|sale|reduction|remise|black-friday", re.I)
+QUAL = r"(?:\s+(?:promo|marraine|parrainage|réduction|de\s+réduction))?"
 CODE_RE = re.compile(
-    r"(?P<intro>\b(?:avec|utilise[rz]?|saisi(?:r|s|ssez)?|entre[rz]?|tape[rz]?|use)\s+(?:le\s+|the\s+)?)?"
-    r"(?:code(?:\s+promo)?|promo\s*code|discount\s*code|coupon)"
+    r"(?P<intro>\b(?:avec|utilise[rz]?|saisi(?:r|s|ssez)?|entre[rz]?|tape[rz]?|mon|ton|votre|use)\s+(?:le\s+|the\s+)?)?"
+    r"(?:code" + QUAL + r"|promo\s*code|discount\s*code|coupon)"
     r"(?P<sep>\s*(?:est\b|:|=|-|–)?[\s«»\"“”'‘’*_`]*)"
     r"(?P<code>[A-Za-z0-9][A-Za-z0-9_-]{3,19})", re.I)
+LABEL_RE = re.compile(
+    r"\bcode" + QUAL + r"\s+(?:[^\s:]+\s+){0,3}?[^\s:]+\s*:\s*[«»\"“”'‘’*_`\s]*(?P<code>[A-Za-z0-9][A-Za-z0-9_-]{3,19})", re.I)
+AFTER_RE = re.compile(r"\s*[:“\"«]\s*[«»\"“”'‘’*_`]*(?P<code>[A-Za-z0-9][A-Za-z0-9_-]{3,19})")
 STRONG = set(":=«»\"“”'‘’*`")
 STOP = {"PROMO", "CODE", "COUPON", "SOLDES", "OFFRE", "VALIDE", "PANIER", "MERCI", "FRANCE", "LIVRAISON", "GRATUIT", "OFFERT", "DISCOUNT"}
 
@@ -56,20 +60,31 @@ def allowed(url):
 def md_of(r):
     return getattr(r.markdown, "raw_markdown", None) or str(r.markdown or "")
 
+def ok_code(code):
+    return code == code.upper() and re.search("[A-Z]", code) and code not in STOP
+
+def add(found, md, code, start, end):
+    ctx = re.sub(r"\s+", " ", md[max(0, start - 60): end + 140])
+    p = re.search(r"(\d{1,2})\s?%", ctx)
+    found.setdefault(code, {"code": code, "percent": int(p.group(1)) if p else None})
+
 def extract(md):
     found = {}
     for m in CODE_RE.finditer(md):
+        nxt = AFTER_RE.match(md, m.end())
+        if nxt and ok_code(nxt.group("code")):
+            add(found, md, nxt.group("code"), m.start(), nxt.end())
+            continue
         code = m.group("code")
-        if code != code.upper() or not re.search("[A-Z]", code) or code in STOP:
+        if not ok_code(code):
             continue
         sep = m.group("sep")
-        sure = (m.group("intro") or any(ch in STRONG for ch in sep)
-                or "est" in sep.lower() or re.search(r"\d", code))
-        if not sure:
-            continue
-        ctx = re.sub(r"\s+", " ", md[max(0, m.start() - 60): m.end() + 140])
-        p = re.search(r"(\d{1,2})\s?%", ctx)
-        found[code] = {"code": code, "percent": int(p.group(1)) if p else None}
+        if (m.group("intro") or any(ch in STRONG for ch in sep)
+                or "est" in sep.lower() or re.search(r"\d", code)):
+            add(found, md, code, m.start(), m.end())
+    for m in LABEL_RE.finditer(md):
+        if ok_code(m.group("code")):
+            add(found, md, m.group("code"), m.start(), m.end())
     return found
 
 def sitemap_urls(origin, limit=300):
