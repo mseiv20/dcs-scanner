@@ -9,6 +9,7 @@ KEY = os.environ["SUPABASE_SERVICE_KEY"].strip()
 H = {"apikey": KEY, "Content-Type": "application/json"}
 COMPETITOR_ID = os.environ.get("COMPETITOR_ID", "").strip()
 
+UA = "Mozilla/5.0 (compatible; DiscountCodeSniffer/1.0)"
 SOURCE = "crawl4ai"
 MAX_PAGES = 15
 STATUS_OK = "success"
@@ -35,11 +36,15 @@ def allowed(url):
     u = urlparse(url)
     key = f"{u.scheme}://{u.netloc}"
     if key not in RP:
-        rp = robotparser.RobotFileParser(key + "/robots.txt")
+        rp = None
         try:
-            rp.read()
-        except Exception:
-            rp = None
+            r = requests.get(key + "/robots.txt", timeout=15, headers={"User-Agent": UA})
+            print("robots.txt", key, "->", r.status_code)
+            if r.status_code == 200:
+                rp = robotparser.RobotFileParser()
+                rp.parse(r.text.splitlines())
+        except Exception as e:
+            print("robots.txt", key, "illisible:", e)
         RP[key] = rp
     return True if RP[key] is None else RP[key].can_fetch("*", url)
 
@@ -63,7 +68,7 @@ def sitemap_urls(origin, limit=300):
         if depth > 2 or len(urls) >= limit:
             return
         try:
-            r = requests.get(u, timeout=20, headers={"User-Agent": "DiscountCodeSniffer/1.0"})
+            r = requests.get(u, timeout=20, headers={"User-Agent": UA})
             if r.status_code != 200:
                 return
             root = ET.fromstring(r.content)
@@ -87,6 +92,9 @@ def site_url(c):
         u = "https://" + u
     return u or None
 
+def host(u):
+    return urlparse(u).netloc.lower().removeprefix("www.")
+
 async def scan(crawler, url):
     if not allowed(url):
         return None, 0, "robots.txt interdit"
@@ -94,15 +102,17 @@ async def scan(crawler, url):
     first = await crawler.arun(url=url, config=cfg)
     if not first.success:
         return None, 0, (first.error_message or "crawl échoué")[:300]
-    pages = [(url, md_of(first))]
-    p = urlparse(url)
+    final = getattr(first, "redirected_url", None) or url
+    p = urlparse(final)
     origin = f"{p.scheme}://{p.netloc}"
+    site = host(final)
+    pages = [(final, md_of(first))]
     inner = []
     for l in (first.links or {}).get("internal", []):
         h = l.get("href") if isinstance(l, dict) else l
-        if h and h.startswith(origin) and h != url:
+        if h and h.startswith("http") and host(h) == site and h not in (url, final):
             inner.append(h)
-    cand = [h for h in sitemap_urls(origin) if h.startswith(origin) and h != url]
+    cand = [h for h in sitemap_urls(origin) if host(h) == site and h not in (url, final)]
     prio = [h for h in cand + inner if KEYWORDS.search(h)]
     others = [h for h in inner + cand if h not in prio]
     seen, targets = set(), []
@@ -115,6 +125,7 @@ async def scan(crawler, url):
         for r in await crawler.arun_many(urls=targets, config=cfg):
             if r.success:
                 pages.append((r.url, md_of(r)))
+    print(site, ":", len(pages), "page(s) lue(s)")
     out = {}
     for _, md in pages:
         for code, d in extract(md).items():
