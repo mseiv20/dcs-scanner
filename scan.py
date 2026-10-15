@@ -17,7 +17,12 @@ STATUS_ERR = "error"
 ALERT_STATUS = "pending"
 
 KEYWORDS = re.compile(r"promo|soldes?|offres?|coupon|code|bons?-plans?|deals?|sale|reduction|remise|black-friday", re.I)
-CODE_RE = re.compile(r"(?:code(?:\s+promo)?|promo\s*code|discount\s*code|coupon)\s*(?:est|:|=|-|–)?[\s«»\"“”'‘’*_`]*([A-Za-z0-9][A-Za-z0-9_-]{3,19})", re.I)
+CODE_RE = re.compile(
+    r"(?P<intro>\b(?:avec|utilise[rz]?|saisi(?:r|s|ssez)?|entre[rz]?|tape[rz]?|use)\s+(?:le\s+|the\s+)?)?"
+    r"(?:code(?:\s+promo)?|promo\s*code|discount\s*code|coupon)"
+    r"(?P<sep>\s*(?:est\b|:|=|-|–)?[\s«»\"“”'‘’*_`]*)"
+    r"(?P<code>[A-Za-z0-9][A-Za-z0-9_-]{3,19})", re.I)
+STRONG = set(":=«»\"“”'‘’*`")
 STOP = {"PROMO", "CODE", "COUPON", "SOLDES", "OFFRE", "VALIDE", "PANIER", "MERCI", "FRANCE", "LIVRAISON", "GRATUIT", "OFFERT", "DISCOUNT"}
 
 def sb_get(path):
@@ -54,8 +59,13 @@ def md_of(r):
 def extract(md):
     found = {}
     for m in CODE_RE.finditer(md):
-        code = m.group(1)
+        code = m.group("code")
         if code != code.upper() or not re.search("[A-Z]", code) or code in STOP:
+            continue
+        sep = m.group("sep")
+        sure = (m.group("intro") or any(ch in STRONG for ch in sep)
+                or "est" in sep.lower() or re.search(r"\d", code))
+        if not sure:
             continue
         ctx = re.sub(r"\s+", " ", md[max(0, m.start() - 60): m.end() + 140])
         p = re.search(r"(\d{1,2})\s?%", ctx)
