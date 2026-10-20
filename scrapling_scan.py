@@ -3,8 +3,29 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib import robotparser
 from urllib.parse import urlparse, urljoin, quote
-from scrapling.fetchers import DynamicSession
+try:
+    from scrapling.fetchers import DynamicFetcher as BrowserFetcher
+except ImportError:
+    from scrapling.fetchers import PlayWrightFetcher as BrowserFetcher
+try:
+    import scrapling
+    print("Scrapling version", getattr(scrapling, "__version__", "inconnue"))
+except Exception:
+    pass
 
+class DynamicSession:
+    def __init__(self, **kw):
+        self.kw = kw
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def fetch(self, url):
+        try:
+            return BrowserFetcher.fetch(url, **self.kw)
+        except TypeError:
+            return BrowserFetcher().fetch(url, **self.kw)
+            
 SB = os.environ["SUPABASE_URL"].strip().rstrip("/") + "/rest/v1"
 KEY = os.environ["SUPABASE_SERVICE_KEY"].strip()
 H = {"apikey": KEY, "Content-Type": "application/json"}
@@ -160,8 +181,17 @@ def scan(session, url):
     site = host(final)
     pages = [text]
     inner = []
-    for h in page.css("a::attr(href)").getall():
+        hrefs = []
+    for a in page.css("a"):
+        try:
+            v = a.attrib.get("href")
+        except Exception:
+            v = None
+        if v:
+            hrefs.append(v)
+    for h in hrefs:
         h = urljoin(final, str(h)).split("#")[0]
+        
         if h.startswith("http") and host(h) == site and h not in (url, final):
             inner.append(h)
     cand = [h for h in sitemap_urls(origin) if host(h) == site and h not in (url, final)]
