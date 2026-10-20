@@ -25,7 +25,7 @@ class DynamicSession:
             return BrowserFetcher.fetch(url, **self.kw)
         except TypeError:
             return BrowserFetcher().fetch(url, **self.kw)
-            
+
 SB = os.environ["SUPABASE_URL"].strip().rstrip("/") + "/rest/v1"
 KEY = os.environ["SUPABASE_SERVICE_KEY"].strip()
 H = {"apikey": KEY, "Content-Type": "application/json"}
@@ -181,7 +181,7 @@ def scan(session, url):
     site = host(final)
     pages = [text]
     inner = []
-        hrefs = []
+    hrefs = []
     for a in page.css("a"):
         try:
             v = a.attrib.get("href")
@@ -191,7 +191,6 @@ def scan(session, url):
             hrefs.append(v)
     for h in hrefs:
         h = urljoin(final, str(h)).split("#")[0]
-        
         if h.startswith("http") and host(h) == site and h not in (url, final):
             inner.append(h)
     cand = [h for h in sitemap_urls(origin) if host(h) == site and h not in (url, final)]
