@@ -1,17 +1,28 @@
-import os, re, requests
+import os, re, requests, importlib, importlib.metadata
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib import robotparser
 from urllib.parse import urlparse, urljoin, quote
+
 try:
-    from scrapling.fetchers import DynamicFetcher as BrowserFetcher
-except ImportError:
-    from scrapling.fetchers import PlayWrightFetcher as BrowserFetcher
-try:
-    import scrapling
-    print("Scrapling version", getattr(scrapling, "__version__", "inconnue"))
-except Exception:
-    pass
+    print("Scrapling version", importlib.metadata.version("scrapling"))
+except Exception as e:
+    print("Version de Scrapling inconnue :", e)
+
+fx = importlib.import_module("scrapling.fetchers")
+print("Contenu de scrapling.fetchers :", [n for n in dir(fx) if not n.startswith("_")])
+
+BrowserFetcher, FETCH_NAME = None, None
+for name in ("DynamicFetcher", "PlayWrightFetcher", "Fetcher"):
+    try:
+        BrowserFetcher = getattr(fx, name)
+        FETCH_NAME = name
+        print("Outil utilisé :", name)
+        break
+    except Exception as e:
+        print(name, "indisponible :", repr(e))
+if BrowserFetcher is None:
+    raise SystemExit("Aucun outil de lecture Scrapling disponible")
 
 class DynamicSession:
     def __init__(self, **kw):
@@ -21,6 +32,11 @@ class DynamicSession:
     def __exit__(self, *a):
         return False
     def fetch(self, url):
+        if FETCH_NAME == "Fetcher":
+            try:
+                return BrowserFetcher.get(url)
+            except TypeError:
+                return BrowserFetcher().get(url)
         try:
             return BrowserFetcher.fetch(url, **self.kw)
         except TypeError:
