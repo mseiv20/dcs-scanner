@@ -1,0 +1,37 @@
+name: scrapling
+run-name: ${{ inputs.competitor_id && format('Scrapling - concurrent {0}', inputs.competitor_id) || inputs.user_id && 'Scrapling - lancer le scan' || 'Scrapling - scan planifié' }}
+on:
+  schedule:
+    - cron: "30 1-23/3 * * *"
+  workflow_dispatch:
+    inputs:
+      competitor_id:
+        description: "ID d'un concurrent (vide = non utilisé)"
+        required: false
+        default: ""
+      user_id:
+        description: "ID d'un utilisateur (vide = tous les concurrents actifs)"
+        required: false
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: scrapling-${{ inputs.competitor_id || inputs.user_id || 'all' }}
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "scrapling[fetchers]" requests
+      - run: scrapling install
+      - run: python scrapling_scan.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          COMPETITOR_ID: ${{ inputs.competitor_id }}
+          USER_ID: ${{ inputs.user_id }}
